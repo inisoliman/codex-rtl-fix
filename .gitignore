@@ -1,0 +1,6 @@
+work/
+logs/
+installed-app-backups/
+*.asar
+*.asar.*
+*.log
