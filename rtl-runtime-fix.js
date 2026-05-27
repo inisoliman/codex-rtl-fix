@@ -1,9 +1,10 @@
-/* codex-rtl-runtime-fix v2 */
+/* codex-rtl-runtime-fix v3 */
 (() => {
   const MARK = "data-codex-rtl-fixed";
   const STYLE_ID = "codex-rtl-runtime-fix-style";
-  const STYLE_VERSION = "2";
+  const STYLE_VERSION = "3";
   const OBSERVER_KEY = "__codexRtlRuntimeFixObserver";
+  const OBSERVER_VERSION_KEY = "__codexRtlRuntimeFixObserverVersion";
   const ARABIC_RE = /[\u0590-\u05ff\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff]/;
   const STRONG_TEXT_RE = /[\p{Script=Arabic}\p{Script=Hebrew}A-Za-z]/u;
 
@@ -31,14 +32,20 @@
     "textarea",
     "input:not([type='button']):not([type='submit']):not([type='checkbox']):not([type='radio'])",
     "[contenteditable='true']",
+    "[contenteditable='plaintext-only']",
+    "[contenteditable='']",
+    "[contenteditable]:not([contenteditable='false'])",
     "[role='textbox']",
   ].join(",");
 
   const BLOCK_HOST_SELECTOR = [
     "[data-message-author-role]",
+    "[data-testid*='conversation-turn' i]",
     "[data-testid*='message' i]",
+    "[data-testid*='markdown' i]",
     "[class*='message' i]",
     "[class*='markdown' i]",
+    "[class*='prose' i]",
     "[class*='composer' i]",
     "article",
     "p",
@@ -69,12 +76,13 @@
     style.textContent = `
       [${MARK}],
       ${TEXT_HOST_SELECTOR} {
-        unicode-bidi: plaintext;
-        text-align: start;
+        unicode-bidi: plaintext !important;
+        text-align: start !important;
       }
 
-      ${TEXT_HOST_SELECTOR} {
-        direction: auto;
+      ${TEXT_HOST_SELECTOR},
+      ${TEXT_HOST_SELECTOR} * {
+        unicode-bidi: plaintext !important;
       }
 
       [${MARK}] p,
@@ -82,8 +90,8 @@
       [${MARK}] blockquote,
       [${MARK}] td,
       [${MARK}] th {
-        unicode-bidi: plaintext;
-        text-align: start;
+        unicode-bidi: plaintext !important;
+        text-align: start !important;
       }
 
       pre,
@@ -116,8 +124,8 @@
     if (!el || isExcluded(el)) return;
     el.setAttribute("dir", "auto");
     el.setAttribute(MARK, "true");
-    el.style.unicodeBidi = "plaintext";
-    el.style.textAlign = "start";
+    el.style.setProperty("unicode-bidi", "plaintext", "important");
+    el.style.setProperty("text-align", "start", "important");
   }
 
   function nearestTextContainer(el) {
@@ -212,7 +220,15 @@
   }
 
   function startObserver() {
-    if (window[OBSERVER_KEY]) return;
+    if (window[OBSERVER_KEY] && window[OBSERVER_VERSION_KEY] === STYLE_VERSION) return;
+
+    if (window[OBSERVER_KEY]) {
+      try {
+        window[OBSERVER_KEY].disconnect();
+      } catch {
+        // Keep booting even if an older observer cannot be stopped cleanly.
+      }
+    }
 
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
@@ -242,13 +258,14 @@
     });
 
     window[OBSERVER_KEY] = observer;
+    window[OBSERVER_VERSION_KEY] = STYLE_VERSION;
   }
 
   function boot() {
     scanLikelyRoots();
     startObserver();
     window.__codexRtlRuntimeFix = {
-      version: 1,
+      version: 3,
       scan: scanLikelyRoots,
     };
   }

@@ -5,10 +5,19 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.argv[2] || 9333);
 const timeoutMs = Number(process.argv[3] || 30000);
+const settleMs = Number(process.argv[4] || 5000);
 const runtimePath = path.join(__dirname, "rtl-runtime-fix.js");
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   fail(`Invalid DevTools port: ${process.argv[2]}`);
+}
+
+if (!Number.isInteger(timeoutMs) || timeoutMs < 1000) {
+  fail(`Invalid timeout: ${process.argv[3]}`);
+}
+
+if (!Number.isInteger(settleMs) || settleMs < 0) {
+  fail(`Invalid settle time: ${process.argv[4]}`);
 }
 
 if (!fs.existsSync(runtimePath)) {
@@ -35,33 +44,20 @@ async function getJson(url) {
   return response.json();
 }
 
-async function waitForTargets() {
-  const startedAt = Date.now();
-  let lastError = null;
+function isInjectableTarget(target) {
+  if (!target.webSocketDebuggerUrl) return false;
+  if (target.url?.startsWith("devtools://")) return false;
+  if (target.url === "about:blank" && !target.title) return false;
+  return ["page", "webview", "other"].includes(target.type);
+}
 
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      const targets = await getJson(`http://127.0.0.1:${port}/json/list`);
-      const injectable = targets.filter((target) => {
-        if (!target.webSocketDebuggerUrl) return false;
-        if (target.url?.startsWith("devtools://")) return false;
-        return ["page", "webview", "other"].includes(target.type);
-      });
+async function listInjectableTargets() {
+  const targets = await getJson(`http://127.0.0.1:${port}/json/list`);
+  return targets.filter(isInjectableTarget);
+}
 
-      if (injectable.length > 0) return injectable;
-      lastError = new Error("DevTools is open but no injectable Codex webview target is ready yet.");
-    } catch (error) {
-      lastError = error;
-    }
-
-    await sleep(500);
-  }
-
-  throw new Error(
-    `Could not reach Codex DevTools at 127.0.0.1:${port} within ${timeoutMs}ms. ` +
-      `Make sure Codex was started with --remote-debugging-port=${port}. ` +
-      `Last error: ${lastError?.message || "unknown"}`,
-  );
+function targetKey(target) {
+  return target.id || target.webSocketDebuggerUrl || `${target.type}:${target.url}`;
 }
 
 class CdpClient {
@@ -137,41 +133,94 @@ class CdpClient {
   }
 }
 
-async function injectTarget(target) {
+async function injectTarget(target, { registerNewDocuments }) {
   const client = new CdpClient(target.webSocketDebuggerUrl);
   await client.connect();
 
   try {
     await client.send("Runtime.enable").catch(() => {});
     await client.send("Page.enable").catch(() => {});
-    await client.send("Page.addScriptToEvaluateOnNewDocument", { source: expression }).catch(() => {});
+    if (registerNewDocuments) {
+      await client.send("Page.addScriptToEvaluateOnNewDocument", { source: expression }).catch(() => {});
+    }
     await client.send("Runtime.evaluate", {
       expression,
       awaitPromise: false,
       returnByValue: true,
     });
+    const verification = await client.send("Runtime.evaluate", {
+      expression: `(() => {
+        window.__codexRtlRuntimeFix?.scan?.();
+        return {
+          runtime: Boolean(window.__codexRtlRuntimeFix),
+          style: Boolean(document.getElementById("codex-rtl-runtime-fix-style")),
+          fixedCount: document.querySelectorAll("[data-codex-rtl-fixed]").length,
+          readyState: document.readyState
+        };
+      })()`,
+      awaitPromise: false,
+      returnByValue: true,
+    }).catch(() => null);
+
+    return verification?.result?.value || null;
   } finally {
     client.close();
   }
 }
 
 try {
-  const targets = await waitForTargets();
+  const startedAt = Date.now();
+  const registeredTargets = new Set();
+  const injectedTargets = new Set();
   let injected = 0;
   const errors = [];
+  let lastError = null;
+  let lastChangeAt = 0;
 
-  for (const target of targets) {
+  while (Date.now() - startedAt < timeoutMs) {
+    let targets = [];
     try {
-      await injectTarget(target);
-      injected += 1;
-      console.log(`Injected RTL fix into ${target.type}: ${target.title || target.url || "Codex target"}`);
+      targets = await listInjectableTargets();
+      if (targets.length === 0) {
+        lastError = new Error("DevTools is open but no injectable Codex webview target is ready yet.");
+      }
     } catch (error) {
-      errors.push(`${target.title || target.url || target.id}: ${error.message}`);
+      lastError = error;
     }
+
+    for (const target of targets) {
+      const key = targetKey(target);
+      const registerNewDocuments = !registeredTargets.has(key);
+
+      try {
+        const verification = await injectTarget(target, { registerNewDocuments });
+        registeredTargets.add(key);
+
+        if (!injectedTargets.has(key)) {
+          injectedTargets.add(key);
+          injected += 1;
+          lastChangeAt = Date.now();
+          const status = verification
+            ? ` runtime=${verification.runtime} style=${verification.style} fixed=${verification.fixedCount} ready=${verification.readyState}`
+            : "";
+          console.log(`Injected RTL fix into ${target.type}: ${target.title || target.url || "Codex target"}${status}`);
+        }
+      } catch (error) {
+        const message = `${target.title || target.url || target.id}: ${error.message}`;
+        if (!errors.includes(message)) errors.push(message);
+      }
+    }
+
+    if (injected > 0 && Date.now() - lastChangeAt >= settleMs) break;
+    await sleep(500);
   }
 
   if (injected === 0) {
-    fail(`Could not inject RTL fix into any Codex target.\n${errors.join("\n")}`);
+    fail(
+      `Could not inject RTL fix into any Codex target within ${timeoutMs}ms.\n` +
+        `Last DevTools error: ${lastError?.message || "unknown"}\n` +
+        errors.join("\n"),
+    );
   }
 
   if (errors.length > 0) {

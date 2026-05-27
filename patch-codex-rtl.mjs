@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MARKER = "codex-rtl-runtime-fix v2";
+const MARKER = "codex-rtl-runtime-fix v3";
 const DEFAULT_RUNTIME_PATH = path.join(__dirname, "rtl-runtime-fix.js");
 const BLOCK_SIZE = 4 * 1024 * 1024;
 

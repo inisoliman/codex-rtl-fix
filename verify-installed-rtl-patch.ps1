@@ -104,7 +104,7 @@ try {
   if (!mainScript) throw new Error('Could not find webview module script.');
 
   const source = read(mainScript);
-  if (!source.includes('codex-rtl-runtime-fix v2')) {
+  if (!source.includes('codex-rtl-runtime-fix v3')) {
     throw new Error(`RTL marker not found in ${mainScript}`);
   }
 

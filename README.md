@@ -72,7 +72,7 @@ START_CODEX_WITH_RTL_FIX_DETACHED.cmd
 powershell -NoProfile -ExecutionPolicy Bypass -File .\launch-codex-with-rtl-injection.ps1
 ```
 
-إذا كان المنفذ `9333` مشغولًا:
+إذا كان المنفذ `9333` مشغولًا، سيحاول المشغّل اختيار منفذ متاح تلقائيًا. ويمكنك أيضًا تحديد منفذ يدويًا:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\launch-codex-with-rtl-injection.ps1 -Port 9334
@@ -219,7 +219,7 @@ rtl-runtime-fix.js
 العلامة المستخدمة لتجنب تكرار الحقن:
 
 ```text
-codex-rtl-runtime-fix v1
+codex-rtl-runtime-fix v3
 ```
 
 إذا كانت العلامة موجودة، لن يضيف patch جديدًا مرة ثانية.
